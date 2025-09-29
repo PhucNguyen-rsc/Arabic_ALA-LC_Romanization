@@ -142,13 +142,13 @@ def recompose_waw(line): # reattach waws
     return line.replace(' و ', ' و')
 
 # 2
-def tokenize_skiphyph(sent,puncs=puncs):
+def tokenize_skiphyph(sent,puncs=puncs): # Separates punctuation marks from words with spaces
     chars = []
     sent = str(sent)
     for char in list(sent):
         if char in puncs:
             chars.append(' '+char+' ')
-        else:
+        else: #preserve hyphens
             chars.append(char)
     sent = ''.join(chars)
     sent = re.sub(r'\s+',r' ',sent)

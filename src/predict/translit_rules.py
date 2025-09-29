@@ -192,12 +192,12 @@ def translit_simple(sentence,mapdict,exceptional_spelling_dict,logger=rules_logg
     sentence = str(sentence)
     for tok_index,token in enumerate(sentence.split()):
         # exceptional replacement
-        if token in exceptional_spelling_dict:
+        if token in exceptional_spelling_dict: # exceptional spelling
             logger.count_exceptional_rules((token,exceptional_spelling_dict[token]))
             token = exceptional_spelling_dict[token]
 
-        transliterated.append(translit(token,mapdict))
-        if tok_index == 0: # first token
+        transliterated.append(translit(token,mapdict)) # map arabic character to LOC romanization
+        if tok_index == 0: # Capitalize the first token
             logger.count_morph_rules(('index-0 capitalize','capitalized'))
             transliterated[-1] = capitalize_loc(transliterated[-1])
     return ' '.join(transliterated)
