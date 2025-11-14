@@ -1,197 +1,189 @@
-from pathlib import Path
+"""
+Transliteration rules for Arabic to ALA-LC romanization.
+
+This module provides functions for transliterating Arabic text to ALA-LC romanization.
+It includes both simple character-by-character transliteration and more complex
+morphology-aware transliteration using MADAMIRA analysis.
+"""
+
 import os
 import re
-import pandas as pd
+import sys
+import json
 import logging
-from funcy import log_durations
 import argparse
-import repackage
-repackage.up()
-from data.make_dataset import recompose, tokenize_skiphyph
+import pandas as pd
+from pathlib import Path
+from repackage import up
+up()
+
+from data.make_dataset import tokenize_skiphyph, recompose
 from madamira import analyse
+from utils import log_durations
 
-project_dir = Path(__file__).resolve().parents[2]
+# Set up project paths
+project_dir = str(Path(__file__).resolve().parents[2])
 
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(f'{project_dir}/reports/translit_rules.log', mode='w'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-
-class rulesLogger():
+# Set up rule logging
+class RuleLogger:
     def __init__(self):
-        self.translit_rules = {}
         self.morph_rules = {}
         self.exceptional_rules = {}
+    
+    def count_morph_rules(self, rule_tuple):
+        self.morph_rules[rule_tuple] = self.morph_rules.get(rule_tuple, 0) + 1
+    
+    def count_exceptional_rules(self, rule_tuple):
+        self.exceptional_rules[rule_tuple] = self.exceptional_rules.get(rule_tuple, 0) + 1
+    
+    def write_rules(self, setname, name):
+        # write morph rules
+        rule_dir = Path(f'{project_dir}/reports')
+        rule_dir.mkdir(exist_ok=True)
+        
+        with open(f'{project_dir}/reports/morph_rules_freq-{setname}_{name}.tsv', 'w') as o:
+            o.write('rule\ttype\tcount\n')
+            for (rule, type_), count in sorted(self.morph_rules.items(), key=lambda x: x[1], reverse=True):
+                o.write(f'{rule}\t{type_}\t{count}\n')
+        
+        with open(f'{project_dir}/reports/exceptional_rules_freq-{setname}_{name}.tsv', 'w') as o:
+            o.write('arabic\tromanized\tcount\n')
+            for (arabic, romanized), count in sorted(self.exceptional_rules.items(), key=lambda x: x[1], reverse=True):
+                o.write(f'{arabic}\t{romanized}\t{count}\n')
+        
+        with open(f'{project_dir}/reports/translit_rules_freq-{setname}_{name}.tsv', 'w') as o:
+            o.write('arabic\tromanized\tcount\n')
+            for (arabic, romanized), count in sorted(self.exceptional_rules.items(), key=lambda x: x[1], reverse=True):
+                o.write(f'{arabic}\t{romanized}\t{count}\n')
 
-    def count_translit_rules(self,transliteration_tuples):
-        for rule in transliteration_tuples:
-            if rule in self.translit_rules:
-                self.translit_rules[rule] += 1
-            else:
-                self.translit_rules[rule] = 1
-
-    def count_morph_rules(self,rule_tuple):
-            if rule_tuple in self.morph_rules:
-                self.morph_rules[rule_tuple] += 1
-            else:
-                self.morph_rules[rule_tuple] = 1
-
-    def count_exceptional_rules(self,exceptional_tuple):
-        if exceptional_tuple in self.exceptional_rules:
-            self.exceptional_rules[exceptional_tuple] += 1
-        else:
-            self.exceptional_rules[exceptional_tuple] = 1
-
-rules_logger = rulesLogger()
-
-def get_translit_dict(mode,map_tsv=f'{project_dir}/src/predict/ar2phon/ar2phon_map.tsv'):
-    mapping = pd.read_csv(map_tsv,delimiter='\t').fillna('')
-    mapping.index = mapping['Arabic']
-    return mapping[mode].to_dict()
+rules_logger = RuleLogger()
 
 def load_loc_mappings():
-    return get_translit_dict(mode='LOC')
-
-# def load_caphi_mappings():
-#     return get_translit_dict(mode='CAPHI')
-
-def load_exceptional_spellings(exceptional_tsv=f'{project_dir}/src/predict/ar2phon/loc_exceptional_spellings.tsv'):
-    with open(exceptional_tsv,'r') as f:
-        next(f) #skip header
-        exceptional = dict([(line.strip().split('\t')) for line in f if not line.startswith('#')])
-    return exceptional
-
-def translit(string,mapdict,logger=rules_logger):
     """
-    base greedy transliterator used by other functions, consumes incrementally from start of string, and returns chunks of chars not found in mapdict as is in the place they occured
-    returns list of tuples of original character chunks and what they map to
+    Load the ALA-LC character mapping from JSON file
     """
+    with open(f'{project_dir}/src/predict/loc_map.json', 'r') as f:
+        return json.load(f)
 
-    # recompose string with start and end symbols, which are currently hardcoded into the map_tsv
-    startchar = '<<<<<'
-    endchar = '>>>>>'
-    string = startchar+string+endchar
+def load_exceptional_spellings():
+    """
+    Load exceptional spellings for Arabic words from JSON file
+    """
+    with open(f'{project_dir}/src/predict/exceptional_spellings.json', 'r') as f:
+        return json.load(f)
 
-    # stores tuples of each chunk of chars and their transliteration
-    transliteration = []
-
-    # sort toks from smallest to biggest in length
-    chars_by_len = sorted(list(mapdict.keys()),key=len,reverse=True)
-
-    # index that changes with each match
-    cursor_index = 0
+def translit(token, mapdict):
+    """
+    Transliterate a single Arabic token using character mapping
     
-    # while exit condition incase string is not in dict
-    previous_chars = ''
-
-    # collect char chunks not in dictionary
-    nomap_collector = ''
-    # while string has characters
-    while string[cursor_index:]:
+    Args:
+        token: Arabic string to transliterate
+        mapdict: Dictionary mapping Arabic characters to ALA-LC romanization
         
-        # loops through size sorted toks
-        for chars in chars_by_len:
-            
-            # a regex match, matching from start of string only
-            match = re.match(chars,string[cursor_index:])
-            # put a value in previous tok, if there is a match it will reset to '', otherwise it will allow loop to exit
-            previous_chars = string[cursor_index:]
-            # if regex match
-            if match:
-                # noan_collector contains chars, append it to analyses and reset collector
-                if nomap_collector:
-                    transliteration.append(('NOMAP',nomap_collector))
-                    nomap_collector = ''
-                # update string cursor location
-                cursor_index += match.span()[1]
-                # map
-                mapvalue = mapdict[chars]
-                if mapvalue == '~':
-                    mapvalue = transliteration[-1][1]
-                #append mapvalue to transliteration
-                transliteration.append((chars,mapvalue))
-                # reset previous_chars so while loop does not exit
-                previous_chars = ''
-                # break on first match in order to loop through chars from the start
+    Returns:
+        Romanized string
+    """
+    transliterated = []
+    i = 0
+    while i < len(token):
+        # Try to match multi-character sequences first
+        matched = False
+        for seq_len in range(min(3, len(token) - i), 0, -1):
+            seq = token[i:i+seq_len]
+            if seq in mapdict:
+                transliterated.append(mapdict[seq])
+                i += seq_len
+                matched = True
                 break
         
-        # exit condition: if remaining chars are not exhausted and equal previous_chars it means there is no mapping in the dict for remaining chunk, 
-        # so increment by one char and check again (i.e the loop will restart and check again), capturing all nomap chars in that chunk until a mapping is found or chars are exhausted
-        
-        if cursor_index < len(string) and string[cursor_index:] == previous_chars:
-            
-            nomap_collector += string[cursor_index]
-            cursor_index += 1
-            # if chars are exhausted and noan_collector contains something, append it to analysis
-            if cursor_index == len(string) and nomap_collector:
-                transliteration.append(('NOMAP',nomap_collector))
-
-    if logger:
-        logger.count_translit_rules(transliteration) # list of mapping tupples
+        # If no match found, keep the character as is
+        if not matched:
+            transliterated.append(token[i])
+            i += 1
     
-   
-    transliteration = [chunk[1] for chunk in transliteration]
-    transliteration = ''.join(transliteration)
-
-    return transliteration
-
-# def translit_caphi_token(token,mapdict):
-#     transliteration = translit(token=token,mapdict=mapdict)
-#     return ' '.join([chars[1] for chars in transliteration]).strip()
-
-# def translit_token(token,mapdict,exceptional_spelling_dict): #NOTE: go directly from translit to translit_sentence, this will only break exceptional spellings and is just not necessary
-#     capitalize_symbol = '±'
-#     token = exceptional_spelling_dict.get(token,token)
-#     if token[-1] == capitalize_symbol:
-#         token = token[:-1]
-#         transliteration = translit(token,mapdict=mapdict)
-#         recomposed = ''.join([chars[1] for chars in transliteration]).strip()
-#         recomposed = capitalize_loc(recomposed)
-#     else:
-#         transliteration = translit(token,mapdict=mapdict)
-#         recomposed = ''.join([chars[1] for chars in transliteration]).strip()
-#     return recomposed
-
+    return ''.join(transliterated)
 
 def capitalize_loc(word): # for capitalizing hyphen '-' separated words and words beginning with hamza or 3ayn
-    #when hyphen "-" is present, split into hyphen separated tokens and capitalize last token
+    """
+    Apply proper capitalization rules for ALA-LC romanization
+    
+    This function handles special cases like:
+    - Words with hyphens (capitalize each part)
+    - Words beginning with hamza or ayn (capitalize the second letter)
+    
+    Args:
+        word: Romanized word to capitalize
+        
+    Returns:
+        Properly capitalized word according to ALA-LC standards
+    """
     capitalize_symbol = '±'
     
-    # remove capitalize symbol
+    # Remove capitalize symbol
     if word.endswith(capitalize_symbol):
         word = word[:-1]
 
-    # in case of hyphens
+    # In case of hyphens
     if '-' in word and not word.endswith('-') and not word.startswith('-'):
         split_tokens = word.split('-')
         main_token = split_tokens[-1]
         first_letter = main_token[0]
-        #in case of hamza or 3ayn, next letter is capitalized
-        if first_letter in {'ʼ','ʻ'}:  
+        # In case of hamza or 3ayn, next letter is capitalized
+        if first_letter in {'ʼ','ʻ'} and len(main_token) > 1:  
             chars = [x for x in main_token]
             chars[1] = chars[1].capitalize()
             main_token = ''.join(chars)
+        elif first_letter in {'ʼ','ʻ'} and len(main_token) <= 1:
+            # Handle the case where the token is just a hamza/ayn
+            main_token = first_letter
         else:
             main_token = main_token.capitalize()
         capitalized = '-'.join(split_tokens)
 
-    #for strings with no hyphen
+    # For strings with no hyphen
     else:
-        #in case of hamza or 3ayn, next letter is capitalized
+        # In case of hamza or 3ayn, next letter is capitalized
         if len(word)>1 and word[0] in {'ʼ','ʻ'}: 
             chars = [x for x in word]
             chars[1] = chars[1].capitalize()
             capitalized =  ''.join(chars)
-        # in normal case without hamza, 3ayn, or hyphen
+        elif len(word)==1 and word[0] in {'ʼ','ʻ'}:
+            # Handle the case where the token is just a hamza/ayn
+            capitalized = word
+        # In normal case without hamza, 3ayn, or hyphen
         else:
             capitalized =  word.capitalize()
     return capitalized
 
 
 def translit_simple(sentence,mapdict,exceptional_spelling_dict,logger=rules_logger):
-    '''translit() + handles exceptional spellings and capitalizes first token of sentence'''
-    # capitalize_symbol = '±' # no longer needed as capitalization is done directly
+    '''
+    Simple transliteration with exceptional spellings and first token capitalization
+    
+    Args:
+        sentence: Arabic text to transliterate
+        mapdict: Dictionary mapping Arabic characters to ALA-LC romanization
+        exceptional_spelling_dict: Dictionary of special cases with custom romanizations
+        logger: Logger object to track rule applications
+        
+    Returns:
+        Romanized text with basic rules applied
+    '''
     transliterated = []
     sentence = str(sentence)
     for tok_index,token in enumerate(sentence.split()):
-        # exceptional replacement
+        # Exceptional replacement
         if token in exceptional_spelling_dict: # exceptional spelling
             logger.count_exceptional_rules((token,exceptional_spelling_dict[token]))
             token = exceptional_spelling_dict[token]
@@ -205,8 +197,17 @@ def translit_simple(sentence,mapdict,exceptional_spelling_dict,logger=rules_logg
 # def translit_morph(mada_sentnece_object,loc_mapdict,exceptional_spellings):
 
 def get_diac(analysis):
+    """
+    Extract diacritized forms from analysis object
+    
+    Args:
+        analysis: Analysis object containing sentence data
+        
+    Returns:
+        Recomposed string with diacritics
+    """
     diacritized = []
-    for sent in anlaysis:
+    for sent in analysis:
         for word in sent.words:
             diac_word = sent.analysis[word]['diac']
             diacritized.append(diac_word)
@@ -217,39 +218,61 @@ def get_diac(analysis):
 
 
 def translit_morph(mada_sentnece_object,loc_mapdict,exceptional_spellings,logger=rules_logger): #TODO: 1) break up into smaller functions. 2) turn transliterator into class with constructor
-    '''takes a madaSentenceObject from parse_analyser_output()'''
-    capschar = '±'
-    words = mada_sentnece_object.words # list of words
-    toks = mada_sentnece_object.toks # list of words which are diacritized and affix tokenized
-    sentence_analysis = mada_sentnece_object.analysis # dictionary with word keys and analysis values
+    '''
+    Apply MADAMIRA-style post-processing rules to romanize Arabic text
     
-    modified_words = []
-    # loop through words in mada_sentence_object (made of lists of words/tokenized_words and dictionary of analyeses for each word
+    This function takes a MADAMIRA sentence object (containing words, tokens, and analyses)
+    and applies a series of linguistic rules to properly romanize Arabic text according
+    to ALA-LC standards. It handles exceptional spellings, case endings, ta marbuta,
+    clitics, capitalization, and more.
     
-    for tidx in range(len(toks)): #or len(words)
+    Args:
+        mada_sentnece_object: Object from parse_analyser_output() with words, tokens, and analyses
+        loc_mapdict: Dictionary mapping Arabic characters to their romanized forms
+        exceptional_spellings: Dictionary of special cases with custom romanizations
+        logger: Logger object to track rule applications (default: rules_logger)
         
-        # access word and tok (i.e tokenized word) by index
+    Returns:
+        String containing properly romanized text with all rules applied
+    '''
+    # Special character used to mark tokens for capitalization
+    # This is processed at the end when converting to romanized form
+    capschar = '±'
+    
+    # Extract data from the MADAMIRA sentence object
+    words = mada_sentnece_object.words  # Original Arabic words
+    toks = mada_sentnece_object.toks    # Diacritized and tokenized words
+    sentence_analysis = mada_sentnece_object.analysis  # Morphological analysis for each word
+    
+    # Will hold modified Arabic words before final romanization
+    modified_words = []
+    
+    # Process each token in the sentence
+    for tidx in range(len(toks)):
+        # Get current word, token, and its analysis
         word = words[tidx]
         tok = toks[tidx]
-        # access analysis by dictionary lookup of word in sentence_analysis
         analysis = sentence_analysis[word]
 
-        # handle exceptional spelling, skipping rest of loop
+        # EXCEPTIONAL SPELLINGS
+        # Handle words with special/exceptional romanization patterns
+        # These override all other rules and processing
         if word in exceptional_spellings:
             logger.count_exceptional_rules((word,exceptional_spellings[word]))
             tok = exceptional_spellings[word]
-            # capitalization                            NOTE: has to be done here for exceptional spellings as well as after modifications
-            #capitalize sentence initial token          TODO: check all places where capschar may duplicate
+            
+            # Mark sentence-initial tokens for capitalization
             if tidx == 0 and not tok.endswith(capschar):
                 logger.count_morph_rules(('index-0 capitalize','capitalized'))
                 tok = tok+capschar
 
             modified_words.append(tok)
-            continue
+            continue  # Skip the rest of processing for this token
 
-        ## beginning of morph rules
+        ## MORPHOLOGICAL RULE PROCESSING BEGINS
 
-        # look ahead
+        # Set up look-ahead for context-aware rules
+        # This allows rules to consider the next word when making decisions
         if tidx < len(toks)-1:
             nextword = words[tidx+1]
             nexttok = toks[tidx+1]
@@ -259,119 +282,135 @@ def translit_morph(mada_sentnece_object,loc_mapdict,exceptional_spellings,logger
             nexttok = None
             nextanalysis = None
         
-
+        # Extract Buckwalter representation for morphological analysis
+        # This provides detailed information about the word structure
         bw = analysis['bw']
-        bwsplit = bw.split('+')
-        bwending = bwsplit[-1]
-        bwbeginning = bwsplit[0]
+        bwsplit = bw.split('+')  # Split into morphemes
+        bwending = bwsplit[-1]   # Last morpheme (usually contains case info)
+        bwbeginning = bwsplit[0] # First morpheme (usually contains proclitics)
         
-        # rule 1 'lil'
-        ## keep lil instead of li-al
+        # RULE 1: 'LIL' RULE
+        # When the preposition 'li' (to/for) combines with the definite article 'al',
+        # they form 'lil' in Arabic (لِل) instead of 'li-al' (لِ+ال)
         if analysis['prc0'] == 'Al_det' and analysis['prc1'] == 'li_prep':
             logger.count_morph_rules(('li+al','lil'))
             find = re.escape('لِ+ال')
             tok = re.sub(find,r'لِل',tok)
+
+        # RULE 2: CASE ENDINGS REMOVAL
+        # Arabic has grammatical case markers that are often omitted in romanization
         
-        #TODO: fix MADAMIRA bug for la prep thats supposed to be li, e.g: 'لنباتات': {'bw': 'la/PREP+nabAt/NOUN+At/NSUFF_FEM_PL+i/CASE_DEF_GEN',
-                                                                                    #   'gloss': 'plants;vegetation',
-                                                                                    #   'diac': 'لَنَباتاتِ',
-                                                                                    #   'lemma': 'نَبات_1',
-
-
-        ## remove case endings
-        # if word ends with direct object or possessive pronoun do nothing
+        # Exception: If word ends with direct object or possessive pronoun, keep case endings
+        # These are integral to the word's pronunciation and meaning
         if ('DO' in bwending) or ('POSS_PRON' in bwending): 
             logger.count_morph_rules(('case-ending','kept'))
             pass
-        # elif word ends with case ending, nominall suffix, or a verb (imperfective, perfective, and command)
+        # If word ends with case marker or certain suffixes, remove the final diacritics
         elif ('CASE' in bwending) or ('IV' in bwending) or ('PV' in bwending) or ('CV' in bwending) or ('NSUFF' in bwending):
             logger.count_morph_rules(('case-ending','removed'))
-            # remove final diacritic, including alif for tanween
-            tok = re.sub(r'اً(±)?$',r'\1',tok) #alif tanween must be first
-            tok = re.sub(r'[ًٌٍَُِ](±)?$',r'\1',tok)
+            # Remove alif tanween (ـًا) first - this is the accusative indefinite marker
+            tok = re.sub(r'اً(±)?$',r'\1',tok)
+            # Remove other diacritics (ـَ ـُ ـِ ـً ـٌ ـٍ) at the end of the word
+            # The (±)? pattern preserves the capitalization marker if present
+            tok = re.sub(r'[ًٌٍَُِ](±)?$',r'\1',tok)
 
-
-        ## ta marbuta handling
-        # spell ta-marbuta if its in construct state
+        # RULE 3: TA MARBUTA HANDLING
+        # In Arabic, taa marbuta (ة) is pronounced as 'h' in pausal form
+        # but as 't' when in construct state (idafa/إضافة)
         if 'ة' in tok:
             logger.count_morph_rules(('ta-marbuta','total'))
+            # Check if word is in construct state
             if analysis['stt'] == 'c':
-                # caveat: cannot be construct if followed by prep (additional rule for handling odd madamira analysis)
+                # Exception: Cannot be construct if followed by preposition
+                # This handles cases where MADAMIRA analysis is incorrect
                 if nextanalysis and 'PREP' in nextanalysis['bw'].split('+')[0]:
                     logger.count_morph_rules(('ta-marbuta','not-construct (followed by prep)'))
                     pass
                 else:
                     logger.count_morph_rules(('ta-marbuta','construct'))
-                    # put a sukun on the ta-marbuta for transliterator to spell it
+                    # Add sukun (ْ) on ta-marbuta to force its transliteration as 't' instead of 'h'
                     tok = re.sub(r'ة',r'ةْ',tok)
 
-        ## split single letter proclitic
-        # splitprepositions .. currently handling ب and ل only
-        if 'PREP' in bwbeginning and len(bwsplit)>1:  # length condition to make sure letters are actual proclitics
+        # RULE 4: SINGLE LETTER PROCLITICS
+        # Arabic has single-letter prepositions (ب/bi, ل/li)
+        # These should be separated from the main word with hyphens in romanization
+        if 'PREP' in bwbeginning and len(bwsplit)>1:  # Length condition ensures it's a real proclitic
             an = analysis['lemma'].split('_')[0]
+            # Only handle the common single-letter prepositions ب (bi) and ل (li)
             if an in {'لِ-','بِ'}:
                 logger.count_morph_rules(('single-letter clitic','split'))
+                # Add hyphen after the single letter: 'ب' → 'ب-', 'ل' → 'ل-'
+                # The [َُِ]? pattern matches optional diacritics on the letter
                 tok = re.sub(r'([لب][َُِ]?)',r'\1-',tok)
   
-        # capitalization
-        #capitalize sentence initial token          TODO: check all places where capschar may duplicate
+        # RULE 5: CAPITALIZATION RULES
+        # Mark tokens for capitalization based on position and type
+        
+        # Capitalize sentence-initial tokens
         if tidx == 0 and not tok.endswith(capschar):
             logger.count_morph_rules(('index-0 capitalize','capitalized'))
             tok = tok+capschar
-
-        ##conditions for capitalizing non-initial tokens
+        # Capitalization rules for non-initial tokens
         elif tidx > 0:
-            # look back variable
+            # Get the previous token for context
             before = toks[tidx-1]
 
-            # capitalize after period, (a simple sentence segmenter) TODO: what happens when periods are not sentence markers such as acronyms etc
+            # Capitalize after period (sentence boundary)
             if before == '.':
                 logger.count_morph_rules(('after . capitalize','capitalized'))
                 tok = tok+capschar
             
-            # capitalize if gloss is capitalized and pos is proper noun or adjective (and word is not arabic punctuation and not capitalized for other reasons)
+            # Capitalize proper nouns and adjectives with capitalized glosses
+            # Skip Arabic punctuation and already capitalized tokens
             if analysis['pos'] in {'noun_prop','adj'} and analysis['gloss'] and analysis['gloss'][0].isupper() and word not in {'،','؛'} and not tok.endswith(capschar):
-                # print(tok)
                 logger.count_morph_rules(('adj/nounprop capitalized gloss','capitalized'))
                 tok = tok+capschar
 
-            #elif pos in nounprop NOTE: this is to make sure proper nouns are capitalized regardless of gloss and other conditions but maybe better to collapse with previous condition
+            # Ensure all proper nouns are capitalized regardless of gloss
             elif analysis['pos'] in {'noun_prop'} and not tok.endswith(capschar):
                 logger.count_morph_rules(('nounprop','capitalized'))
                 tok = tok+capschar
    
-        
-        ## append modified spellings to token holder
-        # tokenization marker replacement.
+        # TOKENIZATION HANDLING
+        # Process tokens with '+' markers (indicating morpheme boundaries)
         if '+' in tok:
+            # Replace '+' with '- ' and split into separate tokens
+            # This converts morpheme boundaries to proper hyphenated forms
             tmp = tok.replace('+','- ').split(' ') 
             modified_words += tmp
         else:
+            # Add the token as is if no '+' markers
             modified_words.append(tok)
             
-    
-
-    # converting everything
+    # FINAL ROMANIZATION
+    # Convert modified Arabic tokens to romanized form
     transliterated_words = [] 
     for tok in modified_words:
         if tok:
-            # capitalize  NOTE: THEN tranlisterate so as to remove final capschar for proper transliteration
+            # Process capitalization markers
             if tok.endswith(capschar):
+                # Remove capitalization marker before transliteration
                 tok = tok[:-1]
+                # Transliterate first, then apply capitalization
                 transliterated_tok = translit(tok,loc_mapdict)
                 transliterated_tok = capitalize_loc(transliterated_tok)
             else:
+                # Standard transliteration for non-capitalized tokens
                 transliterated_tok = translit(tok,loc_mapdict)
-            # capitalize if capschar at the end
+                
             transliterated_words.append(transliterated_tok)      
         else:
+            # Skip empty tokens
             if tok == '':
                 pass
             else:
+                # Debug output for unexpected token types
                 print(f'whats this tok?: <{tok}>') #TODO: remove this since it doesn't seem to be doing anything
 
+    # Join all transliterated tokens into a sentence
     transliterated_sentence = ' '.join(transliterated_words)
     
+    # Apply final recomposition to handle any remaining issues
     return recompose(transliterated_sentence,mode='rom') 
 
 
@@ -440,37 +479,27 @@ def main():
         analysis = analyse.load_analysis(analyse_output_path)
 
         # parse analysis
-        mada_sent_objects = analyse.parse_analyser_output(analysis)
+        analysis_sentences = analyse.parse_analyser_output(analysis)
         
-        predictions = [] # TODO: this is done through a loop, whereas simple translit is done through a pandas.apply.  should prob make them the same but storing mada_sent_obj in dataframe requires more work
-        for sent in mada_sent_objects:
-            predictions.append(translit_morph(sent,locmap,locexceptional))
-
-        predictions = pd.DataFrame(predictions)
-        
+        # transliterate
+        predictions = []
+        for sentence in analysis_sentences:
+            predictions.append(translit_morph(sentence,locmap,locexceptional))
     else:
-        raise Exception('Invalid -m --mode')
-
+        raise Exception('mode not recognized')
     
-
     # write predictions
-    predictions.to_csv(args.output,sep='\t',index=False,header=False)
-
-    # write rules freq logger to tsv
-    if args.log_rules:
-        translit_rules_freq = pd.DataFrame([{'from':x[0],'to':x[1],'freq':y} for x,y in rules_logger.translit_rules.items()]).sort_values('freq',ascending=False)
-        translit_rules_freq.to_csv(f'{project_dir}/reports/translit_rules_freq-{setname}_{name}.tsv',sep='\t',index=False)
-        
-        morph_rules_freq  = pd.DataFrame([{'from':x[0],'to':x[1],'freq':y} for x,y in rules_logger.morph_rules.items()]).sort_values('freq',ascending=False)
-        morph_rules_freq.to_csv(f'{project_dir}/reports/morph_rules_freq-{setname}_{name}.tsv',sep='\t',index=False)
-
-        exceptional_rules_freq = pd.DataFrame([{'from':x[0],'to':x[1],'freq':y} for x,y in rules_logger.exceptional_rules.items()]).sort_values('freq',ascending=False)
-        exceptional_rules_freq.to_csv(f'{project_dir}/reports/exceptional_rules_freq-{setname}_{name}.tsv',sep='\t',index=False)
-
-if __name__ == "__main__":
-    log_fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    logging.basicConfig(level=logging.INFO, format=log_fmt,filename='reports/translit_rules.log',filemode='a')
-
-    main()
-
+    with open(args.output,'w') as o:
+        for prediction in predictions:
+            o.write(prediction+'\n')
     
+    # write rule frequencies
+    if args.log_rules:
+        rules_logger.write_rules(setname, name)
+    
+    print(f'wrote predictions to {args.output}')
+    logging.info(f'wrote predictions to {args.output}')
+
+
+if __name__ == '__main__':
+    main()
