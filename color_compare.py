@@ -30,135 +30,75 @@ BLUE = "\033[94m"
 YELLOW = "\033[93m"
 RESET = "\033[0m"
 
+
+def generate_html_table(gold_str, camel_str, morph_str):
+    """Generates an HTML table for a single entry to align words vertically."""
+    gold_words = gold_str.split()
+    camel_words = camel_str.split()
+    morph_words = morph_str.split() if morph_str else []
+    
+    max_len = max(len(gold_words), len(camel_words), len(morph_words))
+
+    # Pad shorter lists with empty strings to make them equal length
+    gold_words.extend([''] * (max_len - len(gold_words)))
+    camel_words.extend([''] * (max_len - len(camel_words)))
+    morph_words.extend([''] * (max_len - len(morph_words)))
+
+    table_html = "<table class='comparison-table'>\n"
+    
+    # Ground Truth Row
+    table_html += "  <tr>\n    <th class='row-label'>Ground Truth</th>\n"
+    for word in gold_words:
+        table_html += f"    <td>{word}</td>\n"
+    table_html += "  </tr>\n"
+    
+    # CAMeL Row
+    table_html += "  <tr>\n    <th class='row-label'>CAMeL</th>\n"
+    for i, word in enumerate(camel_words):
+        style = "style='background-color: #ffff99;'" if word != gold_words[i] else ""
+        table_html += f"    <td {style}>{word}</td>\n"
+    table_html += "  </tr>\n"
+    
+    # Morph Rules Row
+    if morph_str is not None:
+        table_html += "  <tr>\n    <th class='row-label'>Morph Rules</th>\n"
+        for i, word in enumerate(morph_words):
+            style = "style='background-color: #ffff99;'" if word != gold_words[i] else ""
+            table_html += f"    <td {style}>{word}</td>\n"
+        table_html += "  </tr>\n"
+        
+    table_html += "</table>"
+    return table_html
+
+
+def highlight_word_diff_term(gold_str, candidate_str):
+    """
+    Compares two strings word by word and highlights differences in the candidate string
+    with a yellow background for terminal output.
+    """
+    gold_words = gold_str.split()
+    candidate_words = candidate_str.split()
+    highlighted_words = []
+    
+    max_len = max(len(gold_words), len(candidate_words))
+    for i in range(max_len):
+        if i < len(gold_words) and i < len(candidate_words):
+            if gold_words[i] == candidate_words[i]:
+                highlighted_words.append(candidate_words[i])
+            else:
+                # Word is different, highlight it
+                highlighted_words.append(f"{YELLOW}{candidate_words[i]}{RESET}")
+        elif i < len(candidate_words):
+            # Extra word in candidate, highlight it
+            highlighted_words.append(f"{YELLOW}{candidate_words[i]}{RESET}")
+
+    return ' '.join(highlighted_words)
+
+
 def colorize_diff(gold, camel):
     """Create a colorful diff between gold and camel strings"""
-    # Split both strings into words
-    gold_words = gold.split()
-    camel_words = camel.split()
-    
-    # Compare word by word
-    result = []
-    i, j = 0, 0
-    
-    # Process words until we run out in either string
-    while i < len(gold_words) and j < len(camel_words):
-        if gold_words[i] == camel_words[j]:
-            # Words match, keep as is
-            result.append(gold_words[i])
-            i += 1
-            j += 1
-        else:
-            # Words differ - check if it's a hyphenation difference
-            g_word = gold_words[i]
-            c_word = camel_words[j]
-            
-            # Check if it's just a hyphenation difference
-            if g_word.replace('-', '') == c_word.replace('-', ''):
-                # Highlight hyphenation differences
-                if '-' in g_word and '-' not in c_word:
-                    # Gold has hyphen that camel doesn't
-                    parts = g_word.split('-')
-                    result.append(f"{parts[0]}{BLUE}-{RESET}{parts[1]}")
-                elif '-' in c_word and '-' not in g_word:
-                    # Camel has hyphen that gold doesn't
-                    result.append(f"{RED}{g_word}{RESET}")
-                else:
-                    # Different hyphen position
-                    result.append(f"{YELLOW}{g_word}{RESET}")
-            else:
-                # More complex difference - character by character
-                char_diff = []
-                for k in range(max(len(g_word), len(c_word))):
-                    if k < len(g_word) and k < len(c_word) and g_word[k] == c_word[k]:
-                        char_diff.append(g_word[k])
-                    elif k < len(g_word):
-                        if g_word[k] == '-':
-                            char_diff.append(f"{BLUE}-{RESET}")
-                        else:
-                            char_diff.append(f"{GREEN}{g_word[k]}{RESET}")
-                    elif k < len(c_word):
-                        char_diff.append(f"{RED}{c_word[k]}{RESET}")
-                
-                result.append(''.join(char_diff))
-            
-            i += 1
-            j += 1
-    
-    # Handle remaining words
-    while i < len(gold_words):
-        result.append(f"{GREEN}{gold_words[i]}{RESET}")
-        i += 1
-        
-    while j < len(camel_words):
-        result.append(f"{RED}{camel_words[j]}{RESET}")
-        j += 1
-    
-    return ' '.join(result)
-
-def html_colorize_diff(gold, camel):
-    """Create an HTML-colored diff between gold and camel strings"""
-    # Split both strings into words
-    gold_words = gold.split()
-    camel_words = camel.split()
-    
-    # Compare word by word
-    result = []
-    i, j = 0, 0
-    
-    # Process words until we run out in either string
-    while i < len(gold_words) and j < len(camel_words):
-        if gold_words[i] == camel_words[j]:
-            # Words match, keep as is
-            result.append(gold_words[i])
-            i += 1
-            j += 1
-        else:
-            # Words differ - check if it's a hyphenation difference
-            g_word = gold_words[i]
-            c_word = camel_words[j]
-            
-            # Check if it's just a hyphenation difference
-            if g_word.replace('-', '') == c_word.replace('-', ''):
-                # Highlight hyphenation differences
-                if '-' in g_word and '-' not in c_word:
-                    # Gold has hyphen that camel doesn't
-                    parts = g_word.split('-')
-                    result.append(f"<span style='color:#0000cc;font-weight:bold'>{parts[0]}-{parts[1]}</span>")
-                elif '-' in c_word and '-' not in g_word:
-                    # Camel has hyphen that gold doesn't
-                    result.append(f"<span style='color:#cc0000;font-weight:bold'>{g_word}</span>")
-                else:
-                    # Different hyphen position
-                    result.append(f"<span style='color:#cc9900;font-weight:bold'>{g_word}</span>")
-            else:
-                # More complex difference - character by character
-                char_diff = []
-                for k in range(max(len(g_word), len(c_word))):
-                    if k < len(g_word) and k < len(c_word) and g_word[k] == c_word[k]:
-                        char_diff.append(g_word[k])
-                    elif k < len(g_word):
-                        if g_word[k] == '-':
-                            char_diff.append(f"<span style='color:#0000cc;font-weight:bold'>-</span>")
-                        else:
-                            char_diff.append(f"<span style='color:#006600;font-weight:bold'>{g_word[k]}</span>")
-                    elif k < len(c_word):
-                        char_diff.append(f"<span style='color:#cc0000;font-weight:bold'>{c_word[k]}</span>")
-                
-                result.append(''.join(char_diff))
-            
-            i += 1
-            j += 1
-    
-    # Handle remaining words
-    while i < len(gold_words):
-        result.append(f"<span style='color:#006600;font-weight:bold'>{gold_words[i]}</span>")
-        i += 1
-        
-    while j < len(camel_words):
-        result.append(f"<span style='color:#cc0000;font-weight:bold'>{camel_words[j]}</span>")
-        j += 1
-    
-    return ' '.join(result)
+    # This function is now a wrapper for the new terminal highlighting logic
+    return highlight_word_diff_term(gold, camel)
 
 def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, use_color=True, html_output=False):
     """Compare two files line by line"""
@@ -237,18 +177,10 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
             # Write entry with HTML formatting
             write(f"<div class='entry'>")
             write(f"<div class='arabic'>Line {i+1}: {arabic}</div>")
-            write(f"<div class='ground-truth'>Ground Truth: {gold}</div>")
-            
-            # Show CAMeL output with differences highlighted inline
-            camel_diff = html_colorize_diff(gold, camel) if camel != gold else camel
-            write(f"<div class='camel'>CAMeL: {camel_diff}</div>")
-            
-            # Add morph rules output if available, with differences highlighted
-            if morph:
-                morph_diff = html_colorize_diff(gold, morph) if morph != gold else morph
-                write(f"<div class='morph'>Morph Rules: {morph_diff}</div>")
-            
-            # No need for separate diff sections as we're highlighting inline
+
+            # Generate and write the comparison table
+            table = generate_html_table(gold, camel, morph)
+            write(table)
             
             write("</div>")
             write("<div style='height:10px;'></div>")
@@ -269,7 +201,7 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
             
             # Show CAMeL with differences highlighted
             if use_color and camel != gold:
-                diff = colorize_diff(gold, camel)
+                diff = highlight_word_diff_term(gold, camel)
                 write(f"    * CAMeL: {diff}")
             else:
                 write(f"    * CAMeL: {camel}")
@@ -277,7 +209,7 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
             # Add morph rules output if available
             if morph:
                 if use_color and morph != gold:
-                    morph_diff = colorize_diff(gold, morph)
+                    morph_diff = highlight_word_diff_term(gold, morph)
                     write(f"    * Morph Rules: {morph_diff}")
                 else:
                     write(f"    * Morph Rules: {morph}")
@@ -307,7 +239,7 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
         if morph_lines:
             write(f"Morph Rules Matches: {morph_matches} ({morph_match_percent:.2f}%)")
             write(f"Morph Rules Differences: {total - morph_matches} ({100-morph_match_percent:.2f}%)")
-        write(f"(Differences are highlighted in the outputs above)")
+        # Removing the now-redundant explanation line.
     
     # Close file if opened
     if output_file:
@@ -342,23 +274,13 @@ def main():
             f.write("<meta charset=\"UTF-8\">\n")
             f.write("<title>CAMeL vs Gold Comparison</title>\n")
             f.write("<style>\n")
-            f.write("body { font-family: 'Courier New', monospace; line-height: 1.5; max-width: 1200px; margin: 0 auto; padding: 20px; }\n")
-            f.write(".entry { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; padding: 15px; margin-bottom: 20px; }\n")
+            f.write("body { font-family: 'SF Mono', 'Courier New', monospace; line-height: 1.5; max-width: 95%; margin: 0 auto; padding: 20px; }\n")
+            f.write(".entry { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; padding: 15px; margin-bottom: 20px; overflow-x: auto; }\n")
             f.write(".arabic { font-family: 'Arial', sans-serif; font-size: 18px; direction: rtl; margin-bottom: 10px; }\n")
-            f.write(".ground-truth { background-color: #f0f7ff; padding: 5px; border-left: 4px solid #0066cc; margin: 5px 0; }\n")
-            f.write(".camel { background-color: #fff6f0; padding: 5px; border-left: 4px solid #cc6600; margin: 5px 0; }\n")
-            f.write(".morph { background-color: #f0fff6; padding: 5px; border-left: 4px solid #00cc66; margin: 5px 0; }\n")
-            f.write(".match { font-weight: bold; }\n")
-            f.write(".match-yes { color: green; }\n")
-            f.write(".match-no { color: red; }\n")
-            f.write(".diff { background-color: #fffaf0; padding: 10px; margin: 10px 0; border-left: 4px solid #ffcc00; font-size: 16px; }\n")
-            f.write(".morph-diff { background-color: #f0fff9; border-left: 4px solid #00cc66; }\n")
-            f.write(".diff span { font-weight: bold; }\n")
+            f.write(".comparison-table { border-collapse: collapse; width: 100%; margin-top: 10px; }\n")
+            f.write(".comparison-table th, .comparison-table td { padding: 8px 12px; text-align: left; border: 1px solid #e0e0e0; min-width: 100px; }\n")
+            f.write(".comparison-table th.row-label { background-color: #f0f7ff; font-weight: bold; white-space: nowrap; }\n")
             f.write(".summary { background-color: #eee; padding: 15px; margin-top: 30px; border-radius: 5px; }\n")
-            f.write(".red, span.red { color: #cc0000; font-weight: bold; }\n")
-            f.write(".green, span.green { color: #006600; font-weight: bold; }\n")
-            f.write(".blue, span.blue { color: #0000cc; font-weight: bold; }\n")
-            f.write(".gold, span.gold { color: #cc9900; font-weight: bold; }\n")
             f.write("</style>\n</head>\n<body>\n")
             f.write("<h1>CAMeL vs Gold Standard Comparison</h1>\n")
     
