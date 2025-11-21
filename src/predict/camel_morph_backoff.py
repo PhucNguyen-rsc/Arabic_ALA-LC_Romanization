@@ -125,9 +125,6 @@ def main() -> None:
     arabic_predictions: list[str] = []
     sentences = tqdm(data['ar'].astype(str), desc="Romanizing", unit="sentence")
 
-    prc0_set = set()
-    prc1_set = set()
-
     for sentence in sentences:
         tokens = sentence.split() # raw arabic tokens
 
@@ -138,11 +135,6 @@ def main() -> None:
 
         for idx, (tok, dw) in enumerate(zip(tokens, disamb_words)): 
             analysis = (dw.analyses[0].analysis)
-
-            if analysis.get('prc0') and analysis.get('prc0') != '0' and analysis.get('prc0') != 'na':
-                prc0_set.add(analysis.get('prc0'))
-            if analysis.get('prc1') and analysis.get('prc1') != '0' and analysis.get('prc1') != 'na':
-                prc1_set.add(analysis.get('prc1'))
 
             diac = analysis.get('diac')
             diacritized_words.append(diac)
@@ -281,8 +273,6 @@ def main() -> None:
 
     print(f"Wrote {len(predictions)} lines to {output_txt}")
     print(f"Wrote {len(arabic_predictions)} lines to {output_arabic_txt}")
-    print(f"Unique prc0 found: {sorted(list(prc0_set))}")
-    print(f"Unique prc1 found: {sorted(list(prc1_set))}")
 
 
 if __name__ == "__main__":
