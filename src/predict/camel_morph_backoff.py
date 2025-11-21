@@ -158,8 +158,13 @@ def main() -> None:
             bwbeginning = bwsplit[0]
 
             if analysis['prc0'] == 'Al_det' and analysis['prc1'] == 'li_prep':
-                find = re.escape('لِ+ال')
-                diac = re.sub(find,r'لِل',diac)
+                # Handle case where diac has 'لِ+ال' (replace with 'لِل+')
+                if 'لِ+ال' in diac:
+                    find = re.escape('لِ+ال')
+                    diac = re.sub(find, r'لِل+', diac)
+                # Handle case where diac already has 'لِل' without marker (add '+')
+                elif diac.startswith('لِل'):
+                    diac = diac.replace('لِل', 'لِل+', 1)
 
             elif analysis.get('prc0') == 'Al_det':
                 if diac.startswith('ال'):
