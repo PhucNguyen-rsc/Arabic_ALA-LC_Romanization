@@ -129,8 +129,6 @@ def main() -> None:
     prc1_set = set()
 
     for sentence in sentences:
-        # normalized_sentence = normalize_unicode(sentence)
-
         tokens = sentence.split() # raw arabic tokens
 
         disamb_words = disamb.disambiguate(tokens) # list of DisambiguationWord objects
