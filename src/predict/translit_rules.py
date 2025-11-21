@@ -231,7 +231,7 @@ def translit_morph(mada_sentnece_object,loc_mapdict,exceptional_spellings,logger
         tok = toks[tidx]
         # access analysis by dictionary lookup of word in sentence_analysis
         analysis = sentence_analysis[word]
-        diacritized_words.append(tok.replace('±', ''))
+        diacritized_words.append(tok.replace('+', ''))
 
         # handle exceptional spelling, skipping rest of loop
         if word in exceptional_spellings:

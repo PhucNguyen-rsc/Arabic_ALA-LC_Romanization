@@ -8,12 +8,21 @@ Usage:
   # Or with named arguments:
   python3 color_compare.py predictions_out/camelmorph/dev/camel_morph.out data/processed/dev.tsv --morph-file predictions_out/morph/dev/morph.out
 
+  # With Arabic diacritized output files:
+  python3 color_compare.py predictions_out/camelmorph/dev/camel_morph.out data/processed/dev.tsv \
+    --morph-file predictions_out/morph/dev/morph.out \
+    --camel-arabic predictions_out/camelmorph/dev/camel_arabic.out \
+    --morph-arabic predictions_out/morph/dev/morph_arabic.out \
+    --html --output comparison_output.html
+
 Options:
   --limit N      Limit comparison to first N lines
   --output FILE  Write comparison to a file instead of console
   --html         Output HTML file with colored differences
   --no-color     Disable colored output
-  --morph-file FILE  Path to morph rules output file for additional comparison
+  --morph-file FILE      Path to morph rules output file for additional comparison
+  --camel-arabic FILE    Path to CAMeL diacritized Arabic output file
+  --morph-arabic FILE    Path to MADAMIRA diacritized Arabic output file
 """
 
 import sys
@@ -31,7 +40,7 @@ YELLOW = "\033[93m"
 RESET = "\033[0m"
 
 
-def generate_html_table(gold_str, camel_str, morph_str):
+def generate_html_table(gold_str, camel_str, morph_str, arabic_str, camel_arabic_str=None, morph_arabic_str=None):
     """Generates an HTML table for a single entry to align words vertically."""
     gold_words = gold_str.split()
     camel_words = camel_str.split()
@@ -45,6 +54,23 @@ def generate_html_table(gold_str, camel_str, morph_str):
     morph_words.extend([''] * (max_len - len(morph_words)))
 
     table_html = "<table class='comparison-table'>\n"
+    
+    # Original Arabic (single full sentence, not split)
+    table_html += "  <tr>\n    <th class='row-label'>Original Arabic</th>\n"
+    table_html += f"    <td colspan='{max_len}' class='arabic-sentence'>{arabic_str}</td>\n"
+    table_html += "  </tr>\n"
+    
+    # CAMeL Arabic Diacritized (if provided - single full sentence)
+    if camel_arabic_str:
+        table_html += "  <tr>\n    <th class='row-label'>CAMeL Diacritized</th>\n"
+        table_html += f"    <td colspan='{max_len}' class='arabic-sentence'>{camel_arabic_str}</td>\n"
+        table_html += "  </tr>\n"
+    
+    # MADAMIRA Arabic Diacritized (if provided - single full sentence)
+    if morph_arabic_str:
+        table_html += "  <tr>\n    <th class='row-label'>MADAMIRA Diacritized</th>\n"
+        table_html += f"    <td colspan='{max_len}' class='arabic-sentence'>{morph_arabic_str}</td>\n"
+        table_html += "  </tr>\n"
     
     # Ground Truth Row
     table_html += "  <tr>\n    <th class='row-label'>Ground Truth</th>\n"
@@ -100,7 +126,7 @@ def colorize_diff(gold, camel):
     # This function is now a wrapper for the new terminal highlighting logic
     return highlight_word_diff_term(gold, camel)
 
-def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, use_color=True, html_output=False):
+def compare_files(file1, file2, morph_file=None, camel_arabic_file=None, morph_arabic_file=None, limit=None, output_file=None, use_color=True, html_output=False):
     """Compare two files line by line"""
     # Read the first file (CAMeL output)
     with open(file1, 'r', encoding='utf-8') as f:
@@ -122,16 +148,36 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
         with open(morph_file, 'r', encoding='utf-8') as f:
             morph_lines = [line.strip() for line in f]
     
+    # Read the CAMeL Arabic diacritized file if provided
+    camel_arabic_lines = None
+    if camel_arabic_file and os.path.exists(camel_arabic_file):
+        with open(camel_arabic_file, 'r', encoding='utf-8') as f:
+            camel_arabic_lines = [line.strip() for line in f]
+    
+    # Read the MADAMIRA Arabic diacritized file if provided
+    morph_arabic_lines = None
+    if morph_arabic_file and os.path.exists(morph_arabic_file):
+        with open(morph_arabic_file, 'r', encoding='utf-8') as f:
+            morph_arabic_lines = [line.strip() for line in f]
+    
     # Ensure same length for comparison
     file_lengths = [len(camel_lines), len(gold_lines)]
     if morph_lines:
         file_lengths.append(len(morph_lines))
+    if camel_arabic_lines:
+        file_lengths.append(len(camel_arabic_lines))
+    if morph_arabic_lines:
+        file_lengths.append(len(morph_arabic_lines))
         
     min_len = min(file_lengths)
     if len(set(file_lengths)) > 1:
         print(f"Warning: Files have different lengths. CAMeL: {len(camel_lines)}, Gold: {len(gold_lines)}")
         if morph_lines:
             print(f", Morph Rules: {len(morph_lines)}")
+        if camel_arabic_lines:
+            print(f", CAMeL Arabic: {len(camel_arabic_lines)}")
+        if morph_arabic_lines:
+            print(f", MADAMIRA Arabic: {len(morph_arabic_lines)}")
         print(f"Comparing only the first {min_len} lines")
     
     camel_lines = camel_lines[:min_len]
@@ -139,6 +185,10 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
     arabic_lines = arabic_lines[:min_len]
     if morph_lines:
         morph_lines = morph_lines[:min_len]
+    if camel_arabic_lines:
+        camel_arabic_lines = camel_arabic_lines[:min_len]
+    if morph_arabic_lines:
+        morph_arabic_lines = morph_arabic_lines[:min_len]
     
     # Apply limit if specified
     if limit:
@@ -147,6 +197,10 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
         arabic_lines = arabic_lines[:limit]
         if morph_lines:
             morph_lines = morph_lines[:limit]
+        if camel_arabic_lines:
+            camel_arabic_lines = camel_arabic_lines[:limit]
+        if morph_arabic_lines:
+            morph_arabic_lines = morph_arabic_lines[:limit]
     
     # Prepare output
     if output_file:
@@ -163,6 +217,8 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
     if html_output:
         for i, (camel, gold, arabic) in enumerate(zip(camel_lines, gold_lines, arabic_lines)):
             morph = morph_lines[i] if morph_lines else None
+            camel_arabic = camel_arabic_lines[i] if camel_arabic_lines else None
+            morph_arabic = morph_arabic_lines[i] if morph_arabic_lines else None
             
             camel_match = "✓" if camel == gold else "✗"
             camel_match_class = "match-yes" if camel_match == "✓" else "match-no"
@@ -176,10 +232,10 @@ def compare_files(file1, file2, morph_file=None, limit=None, output_file=None, u
             
             # Write entry with HTML formatting
             write(f"<div class='entry'>")
-            write(f"<div class='arabic'>Line {i+1}: {arabic}</div>")
+            write(f"<div class='line-number'>Line {i+1}</div>")
 
             # Generate and write the comparison table
-            table = generate_html_table(gold, camel, morph)
+            table = generate_html_table(gold, camel, morph, arabic, camel_arabic, morph_arabic)
             write(table)
             
             write("</div>")
@@ -252,6 +308,8 @@ def main():
     parser.add_argument("file2", help="Path to ground truth standard TSV file")
     parser.add_argument("file3", nargs="?", default=None, help="Path to morph rules output file (optional positional argument)")
     parser.add_argument("--morph-file", help="Path to morph rules output file (alternative to file3)")
+    parser.add_argument("--camel-arabic", help="Path to CAMeL diacritized Arabic output file")
+    parser.add_argument("--morph-arabic", help="Path to MADAMIRA diacritized Arabic output file")
     parser.add_argument("--limit", type=int, help="Limit comparison to first N lines")
     parser.add_argument("--output", help="Write comparison to a file instead of console")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
@@ -276,17 +334,18 @@ def main():
             f.write("<style>\n")
             f.write("body { font-family: 'SF Mono', 'Courier New', monospace; line-height: 1.5; max-width: 95%; margin: 0 auto; padding: 20px; }\n")
             f.write(".entry { background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 5px; padding: 15px; margin-bottom: 20px; overflow-x: auto; }\n")
-            f.write(".arabic { font-family: 'Arial', sans-serif; font-size: 18px; direction: rtl; margin-bottom: 10px; }\n")
+            f.write(".line-number { font-weight: bold; margin-bottom: 10px; font-size: 16px; color: #333; }\n")
             f.write(".comparison-table { border-collapse: collapse; width: 100%; margin-top: 10px; }\n")
             f.write(".comparison-table th, .comparison-table td { padding: 8px 12px; text-align: left; border: 1px solid #e0e0e0; min-width: 100px; }\n")
             f.write(".comparison-table th.row-label { background-color: #f0f7ff; font-weight: bold; white-space: nowrap; }\n")
+            f.write(".comparison-table td.arabic-sentence { font-family: 'Arial', sans-serif; font-size: 16px; direction: rtl; text-align: right; background-color: #f0fff0; padding: 10px; }\n")
             f.write(".summary { background-color: #eee; padding: 15px; margin-top: 30px; border-radius: 5px; }\n")
             f.write("</style>\n</head>\n<body>\n")
             f.write("<h1>CAMeL vs Gold Standard Comparison</h1>\n")
     
     # Use either positional argument file3 or named argument morph-file
     morph_file = args.file3 if args.file3 else args.morph_file
-    compare_files(args.file1, args.file2, morph_file, args.limit, args.output, not args.no_color, args.html)
+    compare_files(args.file1, args.file2, morph_file, args.camel_arabic, args.morph_arabic, args.limit, args.output, not args.no_color, args.html)
     
     # If HTML output is requested, close the HTML tags
     if args.html and args.output:

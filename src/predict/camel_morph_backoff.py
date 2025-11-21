@@ -112,8 +112,6 @@ def main() -> None:
     # Only override the analyzer if we're using custom analyzer
     if args.custom_analyzer:
         disamb._analyzer = analyzer
-
-    counter = 0
     
     # No need for custom GPU handling - BERTUnfactoredDisambiguator uses GPU by default
     import torch
@@ -131,9 +129,9 @@ def main() -> None:
     prc1_set = set()
 
     for sentence in sentences:
-        normalized_sentence = normalize_unicode(sentence)
+        # normalized_sentence = normalize_unicode(sentence)
 
-        tokens = normalized_sentence.split() # raw arabic tokens
+        tokens = sentence.split() # raw arabic tokens
 
         disamb_words = disamb.disambiguate(tokens) # list of DisambiguationWord objects
 
@@ -149,9 +147,7 @@ def main() -> None:
                 prc1_set.add(analysis.get('prc1'))
 
             diac = analysis.get('diac')
-            diacritized_words.append(diac.replace('±', ''))
-
-            print(f"Original Diac: {diac}")
+            diacritized_words.append(diac)
 
             if tok in loc_exceptional:
                 diac = loc_exceptional[tok]
@@ -175,45 +171,23 @@ def main() -> None:
                 find = re.escape('لِ+ال')
                 diac = re.sub(find,r'لِل',diac)
 
-            # elif analysis.get('prc0') == 'Al_det':
-            #     if diac.startswith('ال'):
-            #          diac = diac.replace('ال', 'ال+', 1)
+            elif analysis.get('prc0') == 'Al_det':
+                if diac.startswith('ال'):
+                     diac = diac.replace('ال', 'ال+', 1)
             
-            # # Add '+' to bi_prep (Preposition 'bi')
-            # elif analysis.get('prc1') == 'bi_prep':
-            #      if diac.startswith('بِ') :
-            #          diac = diac.replace('بِ', 'بِ+', 1)
+            # Handle 'bi' (bi_prep, bi_part)
+            elif analysis.get('prc1') in ['bi_prep', 'bi_part']:
+                if diac.startswith('بِ') :
+                    diac = diac.replace('بِ', 'بِ+', 1)
 
-            # # Add '+' to li_prep (Preposition 'li') - when NOT part of 'lil'
-            # elif analysis.get('prc1') == 'li_prep':
-            #      if diac.startswith('لِ'):
-            #          diac = diac.replace('لِ', 'لِ+', 1)
-            
-            # rule 1 'lil'
-            ## keep lil instead of li-al
-            # if analysis.get('prc0') == 'Al_det' and analysis.get('prc1') == 'li_prep':
-            #     # If diac starts with 'lil' (لِل), add '+' to hyphenate it later
-            #     if diac.startswith('لِل'):
-            #         diac = diac.replace('لِل', 'لِل+', 1)
-            #     # Fallback for if diac still has separate form (unlikely in standard output but possible)
-            #     elif 'لِ+ال' in diac:
-            #         find = re.escape('لِ+ال')
-            #         diac = re.sub(find, r'لِل+', diac)
+            # Add '+' to li_prep (Preposition 'li') - when NOT part of 'lil'
+            elif analysis.get('prc1') in ['li_prep', 'li_jus', 'li_sub']:
+                if diac.startswith('لِ'):
+                    diac = diac.replace('لِ', 'لِ+', 1)
 
-            # Add '+' to Al_det (Definite Article) if not present
-            # elif analysis.get('prc0') == 'Al_det':
-            #     if diac.startswith('ال'):
-            #          diac = diac.replace('ال', 'ال+', 1)
-            
-            # # Add '+' to bi_prep (Preposition 'bi')
-            # elif analysis.get('prc1') == 'bi_prep':
-            #      if diac.startswith('بِ') :
-            #          diac = diac.replace('بِ', 'بِ+', 1)
-
-            # # Add '+' to li_prep (Preposition 'li') - when NOT part of 'lil'
-            # elif analysis.get('prc1') == 'li_prep':
-            #      if diac.startswith('لِ'):
-            #          diac = diac.replace('لِ', 'لِ+', 1)
+            elif analysis.get('prc2') in ['wa_conj', 'wa_part', 'wa_sub']:
+                if diac.startswith('وَ'):
+                    diac = diac.replace('وَ', 'وَ+', 1)
 
             if ('DO' in bwending) or ('POSS_PRON' in bwending): 
                 pass
