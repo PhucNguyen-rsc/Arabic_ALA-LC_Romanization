@@ -105,12 +105,15 @@ def main() -> None:
 
     # Load CAMeL disambiguator (downloads models on first use)
     if args.bert:
-        disamb = BERTUnfactoredDisambiguator.pretrained('msa')
+        print("Using BERT disambiguator")
+        disamb = BERTUnfactoredDisambiguator.pretrained('msa', pretrained_cache = False, ranking_cache_size = 0)
     else:
-        disamb = MLEDisambiguator.pretrained('calima-msa-r13', cache_size=2000000)
+        print("Using MLE disambiguator")
+        disamb = MLEDisambiguator.pretrained('calima-msa-r13',  pretrained_cache = False)
 
     # Only override the analyzer if we're using custom analyzer
     if args.custom_analyzer:
+        print("Overriding analyzer with custom analyzer")
         disamb._analyzer = analyzer
     
     # No need for custom GPU handling - BERTUnfactoredDisambiguator uses GPU by default
@@ -136,8 +139,9 @@ def main() -> None:
         for idx, (tok, dw) in enumerate(zip(tokens, disamb_words)): 
             analysis = (dw.analyses[0].analysis)
 
-            diac = analysis.get('diac')
-            diacritized_words.append(diac)
+            diac = analysis.get('d3tok')
+            diac = diac.replace('_','')
+            diacritized_words.append(diac.replace('+',''))
 
             if tok in loc_exceptional:
                 diac = loc_exceptional[tok]
@@ -158,31 +162,8 @@ def main() -> None:
             bwbeginning = bwsplit[0]
 
             if analysis['prc0'] == 'Al_det' and analysis['prc1'] == 'li_prep':
-                # Handle case where diac has 'لِ+ال' (replace with 'لِل+')
-                if 'لِ+ال' in diac:
-                    find = re.escape('لِ+ال')
-                    diac = re.sub(find, r'لِل+', diac)
-                # Handle case where diac already has 'لِل' without marker (add '+')
-                elif diac.startswith('لِل'):
-                    diac = diac.replace('لِل', 'لِل+', 1)
-
-            elif analysis.get('prc0') == 'Al_det':
-                if diac.startswith('ال'):
-                     diac = diac.replace('ال', 'ال+', 1)
-            
-            # Handle 'bi' (bi_prep, bi_part)
-            elif analysis.get('prc1') in ['bi_prep', 'bi_part']:
-                if diac.startswith('بِ') :
-                    diac = diac.replace('بِ', 'بِ+', 1)
-
-            # Add '+' to li_prep (Preposition 'li') - when NOT part of 'lil'
-            elif analysis.get('prc1') in ['li_prep', 'li_jus', 'li_sub']:
-                if diac.startswith('لِ'):
-                    diac = diac.replace('لِ', 'لِ+', 1)
-
-            elif analysis.get('prc2') in ['wa_conj', 'wa_part', 'wa_sub']:
-                if diac.startswith('وَ'):
-                    diac = diac.replace('وَ', 'وَ+', 1)
+                find = re.escape('لِ+ال')
+                diac = re.sub(find, r'لِل+', diac)
 
             if ('DO' in bwending) or ('POSS_PRON' in bwending): 
                 pass
@@ -239,7 +220,7 @@ def main() -> None:
                     diac = diac + capschar
             
             if '+' in diac:
-                tmp = diac.replace('+','- ').split(' ')
+                tmp = diac.replace('+','-').split(' ')
                 rom_tokens += tmp
             else:
                 rom_tokens.append(diac)

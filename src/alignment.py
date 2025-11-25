@@ -12,7 +12,6 @@ def _print_table(tbl, m, n):
             sys.stdout.write('\t')
         sys.stdout.write('\n')
 
-
 def _edit_distance(tokens1, tokens2, weight_fns):
     tbl = {}
     tbl[(0, 0)] = (0, 'n')
