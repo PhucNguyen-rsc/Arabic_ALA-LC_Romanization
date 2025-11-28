@@ -76,6 +76,7 @@ def main() -> None:
     parser.add_argument('input_tsv', help='TSV with column ar')
     parser.add_argument('output_txt', help='One ALA-LC line per sentence')
     parser.add_argument('output_arabic_txt', help='One Arabic line per sentence')
+    parser.add_argument('--output-json', help='JSON file to save analysis data')
     parser.add_argument('--bert', action='store_true', help='Use CAMeL BERT disambiguator if available')
     parser.add_argument('--custom-analyzer', action='store_true', help='Use custom calima-msa-s31.db analyzer instead of default')
     parser.add_argument('--debug', action='store_true', help='Print detailed analysis for first sentence')
@@ -86,6 +87,9 @@ def main() -> None:
     output_arabic_txt = args.output_arabic_txt  
     Path(os.path.dirname(output_txt)).mkdir(parents=True, exist_ok=True)
     Path(os.path.dirname(output_arabic_txt)).mkdir(parents=True, exist_ok=True)
+    
+    if args.output_json:
+        Path(os.path.dirname(args.output_json)).mkdir(parents=True, exist_ok=True)
 
     data = pd.read_csv(input_tsv, sep='\t')
     if 'ar' not in data.columns:
@@ -126,6 +130,7 @@ def main() -> None:
 
     predictions: list[str] = []
     arabic_predictions: list[str] = []
+    analysis_data: list[list[dict]] = []
     sentences = tqdm(data['ar'].astype(str), desc="Romanizing", unit="sentence")
 
     for sentence in sentences:
@@ -135,9 +140,14 @@ def main() -> None:
 
         rom_tokens: list[str] = []
         diacritized_words: list[str] = []
+        token_analyses: list[dict] = []
 
         for idx, (tok, dw) in enumerate(zip(tokens, disamb_words)): 
             analysis = (dw.analyses[0].analysis)
+            
+            # Collect analysis data for JSON output
+            token_analysis = dict(analysis)  # Convert to regular dict for JSON serialization
+            token_analyses.append(token_analysis)
 
             diac = analysis.get('d3tok')
             diac = diac.replace('_','')
@@ -248,6 +258,10 @@ def main() -> None:
         transliterated_sentence = translit_rules.recompose(transliterated_sentence,mode='rom') 
         predictions.append(transliterated_sentence)
         arabic_predictions.append(arabic_sentence)
+        
+        # Append analyses for this sentence
+        if args.output_json:
+            analysis_data.append(token_analyses)
 
     with open(output_txt, 'w', encoding='utf-8') as o:
         for line in predictions:
@@ -259,6 +273,11 @@ def main() -> None:
 
     print(f"Wrote {len(predictions)} lines to {output_txt}")
     print(f"Wrote {len(arabic_predictions)} lines to {output_arabic_txt}")
+    
+    if args.output_json:
+        with open(args.output_json, 'w', encoding='utf-8') as f:
+            json.dump(analysis_data, f, ensure_ascii=False, indent=2)
+        print(f"Wrote analysis data to {args.output_json}")
 
 
 if __name__ == "__main__":
