@@ -20,6 +20,7 @@ from camel_tools.utils.normalize import normalize_unicode
 from camel_tools.utils.normalize import normalize_alef_maksura_ar
 from camel_tools.utils.normalize import normalize_alef_ar
 from camel_tools.utils.normalize import normalize_teh_marbuta_ar
+from camel_tools.tokenizers.word import simple_word_tokenize
 from camel_tools.ner import NERecognizer
 from camel_tools.morphology.database import MorphologyDB
 from camel_tools.morphology.analyzer import Analyzer
@@ -128,13 +129,21 @@ def main() -> None:
     else:
         print("Using CPU for disambiguation (not using BERT or GPU not available)")
 
+    # Send non-arabic letters 
+    # Tokenization --> likely because of punctuations --> use camel tools to split
+    # If the first choice has no analysis, and there are other choices that do have the same score but has analysis --> use it
+    # Among the top choices --> always pick the proper noun instead of other choices
+    # Capitalization --> something is wrong 
+
     predictions: list[str] = []
     arabic_predictions: list[str] = []
     analysis_data: list[list[dict]] = []
     sentences = tqdm(data['ar'].astype(str), desc="Romanizing", unit="sentence")
+    capschar = '±' 
+    # count = 0
 
     for sentence in sentences:
-        tokens = sentence.split() # raw arabic tokens
+        tokens = simple_word_tokenize(sentence)# raw arabic tokens
 
         disamb_words = disamb.disambiguate(tokens) # list of DisambiguationWord objects
 
@@ -183,14 +192,6 @@ def main() -> None:
                 diac = re.sub(r'اً(±)?$',r'\1',diac) #alif tanween must be first
                 diac = re.sub(r'[ًٌٍَُِ](±)?$',r'\1',diac)
             
-            if bw and ('DO' in bwending or 'POSS_PRON' in bwending): 
-                pass
-
-            elif bw and any(marker in bwending for marker in ['CASE', 'IV', 'PV', 'CV', 'NSUFF']):
-                diac = re.sub(r'اً$', '', diac)
-                diac = re.sub(r'[ًٌٍَُِ]$', '', diac)
-
-            
             if 'ة' in diac:
                 if analysis.get('stt') == 'c':
                     # caveat: cannot be construct if followed by prep (additional rule for handling odd madamira analysis)
@@ -207,12 +208,11 @@ def main() -> None:
                     diac = re.sub(r'([لب][َُِ]?)',r'\1-',diac)
 
             # RULE 5: CAPITALIZATION RULES 
-            capschar = '±' 
             
             if idx == 0 and not diac.endswith(capschar):
                 diac = diac + capschar
             elif idx > 0:
-                prev_diac = disamb_words[idx-1].analyses[0].analysis.get('diac')
+                prev_diac = tokens[idx-1]
                 
                 if prev_diac == '.':
                     diac = diac + capschar
@@ -220,7 +220,7 @@ def main() -> None:
                 # capitalize if gloss is capitalized and pos is proper noun or adjective 
                 # (and word is not arabic punctuation and not capitalized for other reasons)
                 elif analysis.get('pos') in {'noun_prop', 'adj'} and \
-                     analysis.get('gloss') and analysis.get('gloss')[0].isupper() and \
+                     analysis.get('gloss') and \
                      tok not in {'،','؛'} and not diac.endswith(capschar):
                     diac = diac + capschar
                 
@@ -230,7 +230,8 @@ def main() -> None:
                     diac = diac + capschar
             
             if '+' in diac:
-                tmp = diac.replace('+','-').split(' ')
+                # Replace one or more consecutive '+' (with optional whitespace around them) with a single '-'
+                tmp = re.sub(r'\s*\++\s*', '- ', diac).split(' ')
                 rom_tokens += tmp
             else:
                 rom_tokens.append(diac)
@@ -245,6 +246,16 @@ def main() -> None:
                     transliterated_diac = capitalize_loc(transliterated_diac)
                 else:
                     transliterated_diac = translit_rules.translit(diac,loc_map)
+
+                # if "ʼ" in transliterated_diac:
+                #     print(f"transliterated_diac: {transliterated_diac}")
+                #     print(f"diac: {diac}")
+                #     print(f"loc_map: {analysis}")
+                #     count +=1
+
+                #     if count > 30:
+                #         return
+
                 transliterated_words.append(transliterated_diac)      
             else:
                 if diac == '':

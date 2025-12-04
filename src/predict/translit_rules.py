@@ -167,6 +167,8 @@ def capitalize_loc(word): # for capitalizing hyphen '-' separated words and word
             main_token = ''.join(chars)
         else:
             main_token = main_token.capitalize()
+        
+        split_tokens[-1] = main_token # NEW: FIX BUG --> never assign back to split_tokens
         capitalized = '-'.join(split_tokens)
 
     #for strings with no hyphen
