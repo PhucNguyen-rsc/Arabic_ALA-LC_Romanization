@@ -140,7 +140,6 @@ def main() -> None:
     analysis_data: list[list[dict]] = []
     sentences = tqdm(data['ar'].astype(str), desc="Romanizing", unit="sentence")
     capschar = '±' 
-    # count = 0
 
     for sentence in sentences:
         tokens = simple_word_tokenize(sentence)# raw arabic tokens
@@ -160,7 +159,7 @@ def main() -> None:
 
             diac = analysis.get('d3tok')
             diac = diac.replace('_','')
-            diacritized_words.append(diac.replace('+',''))
+            diacritized_words.append(analysis.get('d3tok'))
 
             if tok in loc_exceptional:
                 diac = loc_exceptional[tok]
@@ -219,7 +218,7 @@ def main() -> None:
 
                 # capitalize if gloss is capitalized and pos is proper noun or adjective 
                 # (and word is not arabic punctuation and not capitalized for other reasons)
-                elif analysis.get('pos') in {'noun_prop', 'adj'} and \
+                if analysis.get('pos') in {'noun_prop', 'adj'} and \
                      analysis.get('gloss') and \
                      tok not in {'،','؛'} and not diac.endswith(capschar):
                     diac = diac + capschar
@@ -229,13 +228,12 @@ def main() -> None:
                 elif analysis.get('pos') == 'noun_prop' and not diac.endswith(capschar):
                     diac = diac + capschar
             
-            if '+' in diac:
-                # Replace one or more consecutive '+' (with optional whitespace around them) with a single '-'
-                tmp = re.sub(r'\s*\++\s*', '- ', diac).split(' ')
+            if '+' in diac or re.search(r'-\s*-', diac):
+                # Replace one or more consecutive '+' or '-' (with optional whitespace around/between them) with a single '-'
+                tmp = re.sub(r'\s*[+\-]+(\s*[+\-]+)*\s*', '- ', diac).split(' ')
                 rom_tokens += tmp
             else:
                 rom_tokens.append(diac)
-
         transliterated_words = [] 
         for diac in rom_tokens:
             if diac:
@@ -246,15 +244,6 @@ def main() -> None:
                     transliterated_diac = capitalize_loc(transliterated_diac)
                 else:
                     transliterated_diac = translit_rules.translit(diac,loc_map)
-
-                # if "ʼ" in transliterated_diac:
-                #     print(f"transliterated_diac: {transliterated_diac}")
-                #     print(f"diac: {diac}")
-                #     print(f"loc_map: {analysis}")
-                #     count +=1
-
-                #     if count > 30:
-                #         return
 
                 transliterated_words.append(transliterated_diac)      
             else:
